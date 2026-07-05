@@ -5,8 +5,9 @@ use feature 'say';
 use feature 'signatures';
 use TOML::Tiny;
 use Path::Tiny;
+use JSON::Tiny;
 
-my $configFile = path("cepha_conf.toml");
+my $configFile = path("cepha_conf.jsonl");
 my $context = {
     scene => undef,
     children => []
@@ -16,24 +17,19 @@ my $context = {
 my $plannedScene = {
     sceneName => undef,
     reoccurences => [], # populated by canonObjects later on; the assets from the original scene
-    newObjects => [], # any new objects; added via a normal give/child command. See *
+    newObjects => [], # any new objects; added via the give/child command
     time_stamp => undef
 };
 
-# * it's a normal give/child command for the user, but under the hood it's different.
-
-# see cepha.txt for documentation
-
-# creates a new scene and adds to the context stack-- 
+my $lastAction = {type => undef, removedObject => undef} # example: type => kick, removedObject = kickedObject
+# creates a new scene and adds to the context stack--
 # argue sceneName
 sub newScene {
     my $sceneName = shift;
-    # eventually I'll rig up toml or some other config to store data but for now its shallow
     $context->{scene} = $sceneName;
-    $configFile->spew(to_toml($context));
+    say 'Created new scene' . $sceneName;
 }
 
-# give/child
 # argue childName
 sub give {
     unless (defined $context->{scene}) {
@@ -41,14 +37,31 @@ sub give {
     }
     my $childName = shift;
     push @{$context->{children}}, {name => $childName, status => "neutral"};
+    say 'Got it. Placed' . $childName . 'into' . $context->{scene};
 }
 
-# drop/kick
 # argue childName
 sub drop {
     my $childName = shift;
-    die "contextError: no context set, cannot drop child" unless (defined $context->{scene}); 
+    die "contextError: no context set, cannot drop child. Initiate a scene" unless (defined $context->{scene}); 
     @{$context->{children}} = grep { $_->{name} ne $childName } @{$context->{children}};
+    # filter out all the names that aren't child name
+    $lastAction->{type} = drop;
+    $lastAction->{comment} = $childName
+    say "Done! Dropped" . $childName . 'From' . $context->{scene};
+}
+
+# the main use case is reverting a drop/kick
+sub regret {
+    unless (defined $lastAction->{type}) {
+        die 'Sorry, your last action is not reversible.'
+    }
+    unless (defined $context->{scene}) {
+        die 'Sadly, your changes were finalized through the seal command; unable to reverse.'
+    }
+    die 'sorry, only drop/kick reversion is supported right now' unless $lastAction->{type} eq drop;
+    push @{$context->{children}}, $lastAction->{removedObject};
+    say 'Fixed!' . $lastAction->{removedObject} . 'is back in' $context->{scene};
 }
 
 # clears the context stack
@@ -56,42 +69,51 @@ sub drop {
 sub seal {
     die "contextError: cannot seal because no context is set" unless defined $context->{scene};
     $context->{time_stamp} = time();
-    $configFile->spew(to_toml($context));
+    $configFile->append(encode_json($context) . "\n");
     $context->{scene} = undef;
     $context->{children} = [];
+    
 }
 
 # just like the normal give, but meant to contribute to a sprint instead of a normal scene.
 # argue objectName
 sub sprintGive {
     my $objectName = shift;
-    unless ($objectName =~ /([a-zA-Z0-9_]+)\.([a-z]+)/) {
-        die 'invalid asset. Please declare a file extension, such as .obj'
+    if (defined $context->{scene}) {
+        die 'Unexpected Error --seal your current scene';
     }
-    push @{$plannedScene->{newObjects}}, $objectName
+    unless (defined $plannedScene->{sceneName}) {
+        die 'You are not currently in a sprint; start one with cepha sprint instanceName';
+    }
+    # check for a file extension in the given asset
+    unless ($objectName =~ /([a-zA-Z0-9_]+)\.([a-z]+)/) {
+        die 'invalid asset. Please declare a file extension, such as .obj';
+    }
+    push @{$plannedScene->{newObjects}}, $objectName;
+    say 'Done! Stashed' . $objectName . 'in' . $plannedScene->{sceneName}
 }
 
-# argue sceneName
+# argue sceneName --no longer implictly starts a sprint; just double checks
 sub tasks {
+    my $sceneName = shift;
     die 'sprintError: define a sprint' unless defined $plannedScene->{sceneName};
-
-    my $tasksFor = shift;
-    die unless defined $context->{scene} && $context->{scene} eq $tasksFor;
-    my $data = from_toml($config_file->slurp);
-    my @canonObjects = @{$data->children}
-    # canonObjects represents every object from the original scene; they must be represented
-    for my $child (@canonObjects) {
-        # toaster.obj -> neutral
-        say $child->{name} . "->" . $child->{status}
-        push @{$plannedScene->{reoccurences}}, $child 
+    unless ($sceneName eq $plannedScene->{sceneName}) {
+        warn 'You have a sprint defined, but you argued' . $sceneName . 'for tasks instead of' . $plannedScene->{sceneName}
+            . 'but dont worry --Cephalopod will fix this. Keep on keeping on!';
+        $sceneName = $plannedScene->{sceneName};
+    }
+    # I don't see why I should fail there because we already know what it should be. Therefore autocorrect it and keep on moving
+    my @scenes = map {decode_json($_)}
+        $configFile->lines({chomp => 1});
+    my ($foundScene) = grep {$_->{scene} eq $sceneName} @scenes;
+    die 'Error: failed to find' . $sceneName . 'in your scene history' unless $foundScene;
+    for my $child (@{foundScene->{children}}) {
+        # print each object and its status; toaster.obj -> neutral
+        say $child->{name} . "->" . $child->{status};
+        push @{$plannedScene->{reoccurences}}, $child
             unless grep {$_ eq $child } {$plannedScene->{reoccurences}};
-        # I'm trying to check for duplicates
+        # check for duplicates; push child into reoccurences unless its already in there
     }
-    # this implicitly pulls $tasksFor into the context, so we don't need to keep referring to it in take-give/take-abandon
-    unless (grep { $_ eq $tasksFor } @{$context->{children->{name}}}) {
-        die "containmentBreach:" . $tasksFor . "was not sealed";
-    }
-    $context->{scene} = $tasksFor; 
 }
 
 # argue oldAsset, newAsset, and @canonObjects
@@ -108,11 +130,12 @@ sub takeGive {
     my $found = 0;
     for my $child (@{$plannedScene->{reoccurences}}) {
         if ($child->{name} eq $oldAsset) {
-            $child->{status} = $newAsset;
+           $child->{status} = $newAsset;
             $found = 1;
             last;
         }
     }
+    say 'Done Deal! In with the new:' . $newAsset . '--and out with the old.';
 }
 
 # argue oldAsset
@@ -129,8 +152,8 @@ sub takeAbandon {
             $found = 1;
             last;
         }
-       
     }
+    say 'Done deal! Forgetting' . $oldAsset
 }
 
 # required for every other sprint command (tasks, takeGive, takeAbandon)
@@ -139,6 +162,7 @@ sub sprint {
     my $instanceName = shift;
     die 'containmentBreach: seal your current scene before proceeding' if defined $context->{scene};
     ($plannedScene->{sceneName}, $plannedScene->{time_stamp}) = ($instanceName, time());
+    say 'You are now in a sprint for the scene:' . $instanceName;
 }
 
 
@@ -174,6 +198,9 @@ elsif ($input =~ /(cepha)(\s+)(take)\(([a-zA-Z_]+)\)->(give)\(([a-zA-Z_]+)\)/) {
 # cepha take(sceneName)->abandon
 elsif ($input =~ /(cepha)(\s+)(take)\(([a-zA-Z_]+)\)->abandon/) {
     takeAbandon($4);
+}
+elsif ($input =~ /(cepha)(\s+)(regret)/) {
+    regret();
 }
 else {
     die "argumentError:" . $input . " is not a recognized Cephalopod command";
