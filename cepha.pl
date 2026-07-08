@@ -21,13 +21,26 @@ my $plannedScene = {
     time_stamp => undef
 };
 
+# Only checks for Y/N; returns 1 for Y and 0 for N --this will return 0 for any other inputs as well
+sub getYesOrNo {
+    lc(chomp(my $gets = <STDIN>)); # this way, you can arrange y/n in any way (y/N, Y/n, y/n, Y/N)
+    $gets eq 'y'? return 1 : return 0;
+}
+
 my $lastAction = {type => undef, removedObject => undef}; # example: type => kick, removedObject = kickedObject
-# creates a new scene and adds to the context stack--
+# creates a new scene and adds to the context stack
 # argue sceneName
 sub newScene {
     my $sceneName = shift;
+    if (defined $context->{scene}) {
+        say 'You already have a scene in context: ' . $context->{scene} . " \n " .
+        ' Do you still want to create and overwrite? Y/n';
+        got = getYesOrNo(); if ($got == 0) {
+            say 'Cancelling scene creation.'; return;
+        }
+    }
     $context->{scene} = $sceneName;
-    say 'Created new scene' . $sceneName;
+    say 'Successfully created new scene' . $sceneName;
 }
 
 # argue childName
@@ -98,15 +111,15 @@ sub tasks {
     my $sceneName = shift;
     die 'sprintError: define a sprint' unless defined $plannedScene->{sceneName};
     unless ($sceneName eq $plannedScene->{sceneName}) {
-        warn 'You have a sprint defined, but you argued' . $sceneName . 'for tasks instead of' . $plannedScene->{sceneName}
-            . 'but dont worry --Cephalopod will fix this. Keep on keeping on!';
+        warn 'You have a sprint defined, but you argued ' . $sceneName . ' for tasks instead of ' . $plannedScene->{sceneName}
+            . ' but dont worry --Cephalopod will fix this. Keep on keeping on! ';
         $sceneName = $plannedScene->{sceneName};
     }
     # I don't see why I should fail there because we already know what it should be. Therefore autocorrect it and keep on moving
     my @scenes = map {decode_json($_)}
         $configFile->lines({chomp => 1});
     my ($foundScene) = grep {$_->{scene} eq $sceneName} @scenes;
-    die 'Error: failed to find' . $sceneName . 'in your scene history' unless $foundScene;
+    die 'Error: failed to find ' . $sceneName . ' in your scene history' unless $foundScene;
     for my $child (@{$foundScene->{children}}) {
         # print each object and its status; toaster.obj -> neutral
         say $child->{name} . "->" . $child->{status};
@@ -154,7 +167,7 @@ sub takeAbandon {
             last;
         }
     }
-    say 'Done! Forgetting' . $oldAsset
+    say 'Done! Forgetting' . $oldAsset;
 }
 
 # required for every other sprint command (tasks, takeGive, takeAbandon)
