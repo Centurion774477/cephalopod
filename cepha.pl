@@ -10,7 +10,7 @@ use JSON::Tiny;
 my $configFile = path("cepha_conf.jsonl");
 my $context = {
     scene => undef,
-    children => []
+    children => [],
     time_stamp => undef
 };
 # instead of a global boolean I'll check for sceneName's definition (undef or not)
@@ -21,7 +21,7 @@ my $plannedScene = {
     time_stamp => undef
 };
 
-my $lastAction = {type => undef, removedObject => undef} # example: type => kick, removedObject = kickedObject
+my $lastAction = {type => undef, removedObject => undef}; # example: type => kick, removedObject = kickedObject
 # creates a new scene and adds to the context stack--
 # argue sceneName
 sub newScene {
@@ -46,22 +46,22 @@ sub drop {
     die "contextError: no context set, cannot drop child. Initiate a scene" unless (defined $context->{scene}); 
     @{$context->{children}} = grep { $_->{name} ne $childName } @{$context->{children}};
     # filter out all the names that aren't child name
-    $lastAction->{type} = drop;
-    $lastAction->{comment} = $childName
+    $lastAction->{type} = 'drop';
+    $lastAction->{comment} = $childName;
     say "Done! Dropped" . $childName . 'From' . $context->{scene};
 }
 
 # the main use case is reverting a drop/kick
 sub regret {
     unless (defined $lastAction->{type}) {
-        die 'Sorry, your last action is not reversible.'
+        die 'Sorry, your last action is not reversible.';
     }
     unless (defined $context->{scene}) {
-        die 'Sadly, your changes were finalized through the seal command; unable to reverse.'
+        die 'Sadly, your changes were finalized through the seal command; unable to reverse.';
     }
-    die 'sorry, only drop/kick reversion is supported right now' unless $lastAction->{type} eq drop;
+    die 'sorry, only drop/kick reversion is supported right now' unless $lastAction->{type} eq 'drop';
     push @{$context->{children}}, $lastAction->{removedObject};
-    say 'Fixed!' . $lastAction->{removedObject} . 'is back in' $context->{scene};
+    say "Fixed! $lastAction->{removedObject} is back in $context->{scene}";
 }
 
 # clears the context stack
@@ -107,7 +107,7 @@ sub tasks {
         $configFile->lines({chomp => 1});
     my ($foundScene) = grep {$_->{scene} eq $sceneName} @scenes;
     die 'Error: failed to find' . $sceneName . 'in your scene history' unless $foundScene;
-    for my $child (@{foundScene->{children}}) {
+    for my $child (@{$foundScene->{children}}) {
         # print each object and its status; toaster.obj -> neutral
         say $child->{name} . "->" . $child->{status};
         push @{$plannedScene->{reoccurences}}, $child
@@ -122,9 +122,9 @@ sub takeGive {
     unless (defined $context->{scene}) {
         die "contextError: no context set. Please call tasks for this scene";
     }
-    my $sceneName = $context->{scene}
-    die 'invalid argument for oldAsset; nonexistent' unless grep { $_ eq $oldAsset} {@children->children}
-    die 'sprintError: define a sprint' unless defined $plannedScene->{sceneName}
+    my $sceneName = $context->{scene};
+    die 'invalid argument for oldAsset; nonexistent' unless grep { $_ eq $oldAsset} {@{$context}->children};
+    die 'sprintError: define a sprint' unless defined $plannedScene->{sceneName};
     # instead of replacing neutral with abandon, 
     # I'm replacing neutral with the file that is replacing it to save space
     my $found = 0;
@@ -146,6 +146,7 @@ sub takeAbandon {
         die "contextError: no context set. Please call tasks for this scene";
     }
     say "take abandon";
+    my $found = 0;
     for my $child (@{$plannedScene->{reoccurences}}) {
         if ($child->{name} eq $oldAsset) {
             $child->{status} = $ABANDON;
@@ -153,7 +154,7 @@ sub takeAbandon {
             last;
         }
     }
-    say 'Done deal! Forgetting' . $oldAsset
+    say 'Done! Forgetting' . $oldAsset
 }
 
 # required for every other sprint command (tasks, takeGive, takeAbandon)
